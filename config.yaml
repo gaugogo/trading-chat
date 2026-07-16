@@ -1,0 +1,142 @@
+# config.yaml — All tunable parameters for Trading Tools
+# Loaded by core.py; override via environment variables (e.g., CACHE_DAILY_HOURS=4)
+
+# ─── CACHE SETTINGS ───
+cache:
+  daily_hours: 2.0       # Cache TTL for Daily timeframe
+  h4_hours: 1.0           # Cache TTL for 4H timeframe
+  h1_hours: 0.5           # Cache TTL for 1H timeframe
+  m15_hours: 0.25         # Cache TTL for 15m timeframe
+  m5_hours: 0.0833        # Cache TTL for 5m timeframe (~5 min)
+  spot_ttl_seconds: 60    # Spot price cache TTL
+  cache_dir: "cache"      # Cache directory name
+
+# ─── TIMEFRAME WEIGHTS ───
+weights:
+  daily: 5.0
+  h4: 3.0
+  h1: 2.0
+  m15: 1.0
+  m5: 0.5
+
+# ─── SCORING THRESHOLDS ───
+scoring:
+  strong_buy: 4.0        # Score >= this → STRONG BUY
+  buy_bias: 1.5           # Score >= this → BUY BIAS
+  strong_sell: -4.0       # Score <= this → STRONG SELL
+  sell_bias: -1.5         # Score <= this → SELL BIAS
+
+# ─── STRATEGY ATR MULTIPLIERS ───
+strategy:
+  position:
+    atr_sl: 3.0            # SL = 3x ATR(Daily)
+    atr_tp1: 4.0           # TP1 = 4x ATR
+    atr_tp2: 8.0           # TP2 = 8x ATR
+    atr_tp3: 12.0          # TP3 = 12x ATR (runner)
+    risk_pct: 1.0          # Risk per trade: 1% of account
+    min_rr: 2.0            # Minimum R:R
+    bias_tf: "Daily"       # Bias timeframe
+    structure_tf: "4H"     # Structure timeframe
+    entry_tf: "4H"         # Entry timeframe
+
+  swing:
+    atr_sl: 2.0            # SL = 2x ATR(4H)
+    atr_tp1: 2.5           # TP1 = 2.5x ATR
+    atr_tp2: 5.0           # TP2 = 5x ATR
+    risk_pct: 1.0
+    min_rr: 1.5
+    bias_tf: ["Daily", "4H"]
+    entry_tf: "1H"
+    confirm_tf: "15m"
+
+  daytrade:
+    atr_sl: 1.5            # SL = 1.5x ATR(15m)
+    atr_tp1: 2.0           # TP1 = 2x ATR
+    atr_tp2: 3.5           # TP2 = 3.5x ATR
+    risk_pct: 0.75         # Risk per trade: 0.75% of account
+    min_rr: 1.3
+    bias_tf: "4H"
+    structure_tf: "1H"
+    entry_tf: "15m"
+    precision_tf: "5m"
+
+  scalp:
+    ema_short: 5           # Fast EMA period
+    ema_long: 9            # Slow EMA period
+    rsi_period: 7          # Faster RSI for scalping
+    atr_period: 7          # Faster ATR for scalping
+    atr_sl: 1.0            # SL = 1x ATR(5m)
+    atr_tp1: 1.5           # TP1 = 1.5x ATR
+    atr_tp2: 2.5           # TP2 = 2.5x ATR
+    risk_pct: 0.5
+    context_tf: "1H"
+
+  ichimoku:
+    tenkan: 9
+    kijun: 26
+    senkou_b: 52
+    chikou_shift: 26
+    risk_pct: 1.0
+    bias_tf: ["Daily", "4H"]
+    entry_tf: "1H"
+    confirm_tf: "15m"
+
+# ─── BACKTEST DEFAULTS ───
+backtest:
+  initial_capital: 100.0   # Starting capital
+  risk_per_trade: 1.0      # % risk per trade
+  commission_pct: 0.05     # Round-trip commission %
+  max_concurrent: 1        # Max open positions
+
+# ─── DEEPSEEK ───
+deepseek:
+  model: "deepseek-chat"   # Default model (overridden by instrument config)
+  temperature: 0.3
+  max_tokens: 4096
+  timeout_seconds: 120
+  thinking: false          # Enable thinking/reasoning for compatible models
+
+# ─── MARKET REGIME DETECTION ───
+regime:
+  adx:
+    strong: 30.0        # ADX >= 30 → strong trend
+    moderate: 20.0      # ADX 20-30 → moderate trend
+    weak: 15.0          # ADX 15-20 → weak trend
+    period: 14          # ADX period
+  bb_width:
+    high_percentile: 0.80   # Above 80th percentile → volatile
+    low_percentile: 0.20    # Below 20th percentile → low vol
+  atr:
+    high_ratio: 1.5         # Current ATR > 1.5x SMA50 ATR → volatile
+    low_ratio: 0.5          # Current ATR < 0.5x SMA50 ATR → quiet
+    sma_period: 50
+  confidence_weights:
+    adx: 0.3
+    bb_width: 0.2
+    atr_ratio: 0.2
+    trend_alignment: 0.3
+
+# ─── DIVERGENCE DETECTION ───
+divergence:
+  rsi_period: 14
+  macd_fast: 12
+  macd_slow: 26
+  macd_signal: 9
+  min_strength: 0.3     # Minimum divergence strength (0.0-1.0)
+  pivot_order: 5        # Bars each side for pivot confirmation
+
+# ─── RISK CALCULATOR ───
+risk:
+  default_account: 10000.0    # Default account size
+  default_risk_pct: 1.0       # Default risk % per trade
+  default_daily_loss_pct: 3.0 # Default max daily loss %
+  max_concurrent: 3           # Default max concurrent positions
+  min_rr: 2.0                 # Minimum recommended R:R
+
+# ─── DATA PROVIDER ───
+data_provider:
+  primary: "yahoo"         # Primary data source
+  fallback: "alpha_vantage"  # Fallback (future)
+  retry_count: 3           # Number of retries on failure
+  retry_delay: 2           # Seconds between retries
+  timeout: 30              # HTTP request timeout

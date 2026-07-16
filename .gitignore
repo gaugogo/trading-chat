@@ -1,0 +1,61 @@
+# ─── Environment ───
+.env
+.env.local
+.env.*.local
+
+# ─── Python ───
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+dist/
+build/
+*.egg
+.eggs/
+*.whl
+*.so
+.Python
+env/
+venv/
+.venv/
+virtualenv/
+
+# ─── IDE / Editor ───
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+*.sublime-workspace
+
+# ─── Cache (trading data) ───
+cache/
+*.json
+
+# ─── Generated charts & reports ───
+charts/
+chart_*.png
+chart_*.html
+*_analysis_*.txt
+*_deepseek_*.txt
+
+# ─── Pytest ───
+.pytest_cache/
+htmlcov/
+.coverage
+.coverage.*
+coverage.xml
+*.cover
+.pytest_cache/
+
+# ─── Jupyter ───
+.ipynb_checkpoints/
+*.ipynb
+
+# ─── Streamlit ───
+.streamlit/secrets.toml
+
+# ─── Logs ───
+*.log
