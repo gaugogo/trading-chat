@@ -4,7 +4,7 @@ Trading Chat Web App — Streamlit UI
 Chạy trên điện thoại / trình duyệt mobile
 
 Usage:
-  streamlit run app.py              # local
+  streamlit run app.py                         # local
   streamlit run app.py --server.port 8501 --server.address 0.0.0.0   # network
 """
 
@@ -74,8 +74,6 @@ st.markdown("""
     .signal-neutral { color: #fab387; font-weight: 700; }
     h1, h2, h3 { margin-bottom: 0.5rem; }
     .stSpinner > div { border-color: #89b4fa !important; }
-    /* Custom button colors */
-    div[data-testid="column"] button:first-child { margin-bottom: 0.3rem; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -116,7 +114,6 @@ def get_latest_price(tf_data) -> float:
     return 0.0
 
 def fmt_price_st(val, d=2):
-    """Format price, handling None/NaN."""
     if val is None:
         return "N/A"
     try:
@@ -127,7 +124,6 @@ def fmt_price_st(val, d=2):
     return f"{val:.{d}f}"
 
 def plot_candlestick(df: pd.DataFrame, tf_name: str):
-    """Plotly candlestick + indicators."""
     if df.empty or len(df) < 5:
         return None
 
@@ -196,7 +192,6 @@ def plot_candlestick(df: pd.DataFrame, tf_name: str):
     return fig
 
 def format_timeframe_summary(tf_data, instrument):
-    """Quick-summary table."""
     if not tf_data:
         return
     cfg = INSTRUMENTS[instrument]
@@ -211,36 +206,18 @@ def format_timeframe_summary(tf_data, instrument):
         price = float(last["Close"])
         rsi_val = last.get("RSI_14", np.nan)
         rsi = float(rsi_val) if not pd.isna(rsi_val) else None
-        rows.append({
-            "TF": tf,
-            "Trend": trend,
-            "Price": fmt_price_st(price, d),
-            "RSI": f"{rsi:.1f}" if rsi else "N/A",
-            "RSI": "Overbought" if (rsi and rsi > 70) else ("Oversold" if (rsi and rsi < 30) else "Neutral") if rsi else "N/A",
-        })
-    # Fix: separate columns
-    rows2 = []
-    for tf in TF_NAMES:
-        if tf not in tf_data or tf_data[tf].empty:
-            continue
-        df = tf_data[tf]
-        last = df.iloc[-1]
-        trend, _ = determine_trend(df)
-        price = float(last["Close"])
-        rsi_val = last.get("RSI_14", np.nan)
-        rsi = float(rsi_val) if not pd.isna(rsi_val) else None
         rsi_str = f"{rsi:.1f}" if rsi else "N/A"
         rsi_status = "Overbought" if (rsi and rsi > 70) else ("Oversold" if (rsi and rsi < 30) else "Neutral") if rsi else "N/A"
-        rows2.append({
+        rows.append({
             "TF": tf,
             "Trend": trend,
             "Price": price,
             "RSI": rsi_str,
             "Signal": rsi_status,
         })
-    if rows2:
+    if rows:
         st.dataframe(
-            pd.DataFrame(rows2),
+            pd.DataFrame(rows),
             use_container_width=True,
             hide_index=True,
             column_config={
@@ -253,7 +230,6 @@ def format_timeframe_summary(tf_data, instrument):
         )
 
 def render_regime(tf_data):
-    """Market regime box."""
     if not tf_data or "1H" not in tf_data:
         return
     try:
@@ -271,7 +247,6 @@ def render_regime(tf_data):
         st.caption(f"Regime: {e}")
 
 def render_divergence(tf_data):
-    """Divergence detection."""
     if not tf_data:
         return
     try:
@@ -287,7 +262,6 @@ def render_divergence(tf_data):
         st.caption(f"Divergence: {e}")
 
 def render_confluence(tf_data):
-    """Confluence summary."""
     try:
         con = build_confluence_summary(tf_data)
         st.markdown(f"```\n{con}\n```")
@@ -353,15 +327,14 @@ def main():
         ("📈 Position", "position"),
         ("🔀 Swing", "swing"),
         ("⚡ Day Trade", "daytrade"),
+    ]
+    strategies2 = [
         ("🎯 Scalp", "scalp"),
         ("🍁 Ichimoku", "ichimoku"),
         ("🤖 SMC", "smc"),
         ("💬 AI Chat", "ai"),
     ]
-    # Split into two rows for mobile
-    row1 = strategies[:4]
-    row2 = strategies[4:]
-    for row in [row1, row2]:
+    for row in [strategies, strategies2]:
         cols = st.columns(len(row))
         for i, (label, key) in enumerate(row):
             with cols[i]:
@@ -372,7 +345,7 @@ def main():
     active = st.session_state.active_strategy
 
     # ═══════════════════════════════════════════
-    #  TABS: Summary / Charts / Analysis
+    #  TABS
     # ═══════════════════════════════════════════
     tabs = st.tabs(["📊 Summary", "📈 Charts", "📝 Analysis"])
 
@@ -392,7 +365,6 @@ def main():
         st.markdown("### 🔗 Confluence")
         render_confluence(tf_data)
 
-        # Spot price
         if cfg.get("has_spot"):
             try:
                 sp = fetch_spot_price(cfg["spot_url"], instr, cfg.get("symbol", ""))
@@ -415,7 +387,6 @@ def main():
 
     # ── TAB 3: Analysis ──
     with tabs[2]:
-        # Sub-options based on active strategy
         if active == "ai":
             st.markdown("### 💬 Chat với AI")
             user_q = st.text_area(
@@ -427,23 +398,19 @@ def main():
                 if user_q.strip():
                     with st.spinner("🤖 Đang phân tích với DeepSeek..."):
                         try:
-                            # Build report, then ask DeepSeek
                             report = format_report(tf_data, cfg)
-                            api_key = os.environ.get("DEEPSEEK_API_KEY", "")
+                            # Ưu tiên Streamlit secrets, fallback os.environ
+                            api_key = st.secrets.get("DEEPSEEK_API_KEY", "") or os.environ.get("DEEPSEEK_API_KEY", "")
                             if api_key:
                                 result = call_deepseek(report, user_q, api_key, cfg)
-                                if result:
-                                    st.session_state.last_result = result
-                                else:
-                                    st.session_state.last_result = "⚠️ AI không phản hồi. Kiểm tra API key."
+                                st.session_state.last_result = result or "⚠️ AI không phản hồi."
                             else:
-                                st.session_state.last_result = "⚠️ Chưa set DEEPSEEK_API_KEY trong .env"
+                                st.session_state.last_result = "⚠️ Chưa set DEEPSEEK_API_KEY — tạo .streamlit/secrets.toml"
                         except Exception as e:
                             st.session_state.last_result = f"❌ Lỗi: {e}"
                 else:
                     st.warning("Nhập câu hỏi trước khi gửi.")
         else:
-            # Run analysis
             strategy_fn_map = {
                 "data": (None, "data"),
                 "position": (run_position_analysis, "position"),
@@ -475,7 +442,6 @@ def main():
         if st.session_state.last_result:
             st.markdown("### 📋 Result")
             with st.container():
-                # Render as markdown if possible, else code block
                 text = st.session_state.last_result
                 if text.startswith("#") or text.startswith("|") or "**" in text:
                     st.markdown(text)
