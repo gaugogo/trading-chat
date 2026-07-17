@@ -11,6 +11,7 @@ from typing import Dict, List, Tuple, Optional, Any
 from datetime import datetime
 
 from core import (
+    adjust_to_spot,
     fetch_all_timeframes,
     fetch_spot_price,
     calculate_indicators,
@@ -215,22 +216,27 @@ def build_scalp_report(
     # Tổng hợp bias
     scalp_score = sig_5m["score"] * 2 + sig_15m["score"] * 1.5
     if ctx_trend == "UP":
-        scalp_score += 1
+        scalp_score += 2
     elif ctx_trend == "DOWN":
-        scalp_score -= 1
+        scalp_score -= 2
+
+    # Check context contradiction: lower TFs disagree with 1H bias
+    lower_tf_direction = "BUY" if (sig_5m["score"] * 2 + sig_15m["score"] * 1.5) >= 0 else "SELL"
+    ctx_direction = "BUY" if ctx_trend == "UP" else "SELL" if ctx_trend == "DOWN" else None
+    contradict = ctx_direction and lower_tf_direction != ctx_direction
 
     if scalp_score >= 3.5:
-        scalp_bias = "STRONG BUY"
-        bias_icon = "🟢"
+        scalp_bias = "⚠️ COUNTER-TREND BUY" if contradict else "STRONG BUY"
+        bias_icon = "⚠️" if contradict else "🟢"
     elif scalp_score >= 1.5:
-        scalp_bias = "BUY"
-        bias_icon = "🟢"
+        scalp_bias = "⚠️ COUNTER-TREND BUY" if contradict else "BUY"
+        bias_icon = "⚠️" if contradict else "🟢"
     elif scalp_score <= -3.5:
-        scalp_bias = "STRONG SELL"
-        bias_icon = "🔴"
+        scalp_bias = "⚠️ COUNTER-TREND SELL" if contradict else "STRONG SELL"
+        bias_icon = "⚠️" if contradict else "🔴"
     elif scalp_score <= -1.5:
-        scalp_bias = "SELL"
-        bias_icon = "🔴"
+        scalp_bias = "⚠️ COUNTER-TREND SELL" if contradict else "SELL"
+        bias_icon = "⚠️" if contradict else "🔴"
     else:
         scalp_bias = "WAIT"
         bias_icon = "🟡"
@@ -242,9 +248,9 @@ def build_scalp_report(
     if df_15m.empty or df_5m.empty:
         return "ERROR: Need 15m and 5m data for scalping."
 
-    if scalp_bias in ("STRONG BUY", "BUY"):
+    if "BUY" in scalp_bias:
         zones = scalp_entry_zones(df_15m, df_5m, "BUY", d)
-    elif scalp_bias in ("STRONG SELL", "SELL"):
+    elif "SELL" in scalp_bias:
         zones = scalp_entry_zones(df_15m, df_5m, "SELL", d)
     else:
         zones = None
@@ -287,6 +293,12 @@ def build_scalp_report(
     # Overall signal
     lines.append(f"【SCALPING SIGNAL: {bias_icon} {scalp_bias} (score: {scalp_score:+.1f})】")
 
+    if contradict:
+        lines.append("")
+        lines.append(f"  ⚠️  CẢNH BÁO: Tín hiệu ngược xu hướng 1H ({ctx_trend})!")
+        lines.append(f"  • Giảm 50% khối lượng nếu vẫn muốn vào lệnh")
+        lines.append(f"  • TP1 gần hơn, không giữ lệnh qua đêm")
+
     if zones:
         lines.append("")
         lines.append("【ENTRY & EXIT ZONES】")
@@ -310,6 +322,43 @@ def build_scalp_report(
 
 # ─── Scalping summary (compact, for quick signal) ─────────────────────
 
+def build_scalp_data_for_ai(tf_data: Dict[str, pd.DataFrame], cfg: Dict[str, Any]) -> str:
+    """Build raw data dump for DeepSeek — scalping context."""
+    d = cfg["decimals"]
+    name = cfg["display_name"]
+    lines: List[str] = []
+    lines.append(f"=== SCALPING RAW DATA: {name} ===")
+    lines.append("")
+
+    # Context
+    ctx_df = tf_data.get(CONTEXT_TIMEFRAME)
+    if ctx_df is not None and not ctx_df.empty:
+        from core import determine_trend
+        ctx_trend, ctx_score = determine_trend(ctx_df)
+        ctx_price = float(ctx_df["Close"].iloc[-1])
+        lines.append(f"【CONTEXT — {CONTEXT_TIMEFRAME}】")
+        lines.append(f"  Trend: {ctx_trend} (score: {ctx_score:+d})")
+        lines.append(f"  Price: {fmt_price(ctx_price, d)}")
+        lines.append("")
+
+    for tf_name in ["15m", "5m"]:
+        df = tf_data.get(tf_name)
+        if df is None or df.empty:
+            continue
+        last = df.iloc[-1]
+        sig = scalp_signal_5m(df)
+        lines.append(f"【{tf_name}】")
+        lines.append(f"  O={fmt_price(last['Open'], d)} H={fmt_price(last['High'], d)} L={fmt_price(last['Low'], d)} C={fmt_price(last['Close'], d)}")
+        lines.append(f"  EMA5: {sig['ema5']}  EMA9: {sig['ema9']}")
+        lines.append(f"  RSI7: {sig['rsi7']}  ATR7: {sig['atr']} ({sig['atr_pct']:.4f}%)")
+        lines.append(f"  Range Position: {sig['range_pos_pct']:.0f}%")
+        for detail in sig["details"]:
+            lines.append(f"  - {detail}")
+        lines.append("")
+
+    return "\n".join(lines)
+
+
 def build_scalp_summary(tf_data: Dict[str, pd.DataFrame], cfg: Dict[str, Any]) -> str:
     """Tóm tắt scalping ngắn gọn, dùng cho quick check."""
     d = cfg["decimals"]
@@ -322,14 +371,20 @@ def build_scalp_summary(tf_data: Dict[str, pd.DataFrame], cfg: Dict[str, Any]) -
 
     scalp_score = sig_5m["score"] * 2 + sig_15m["score"] * 1.5
     if ctx_trend == "UP":
-        scalp_score += 1
+        scalp_score += 2
     elif ctx_trend == "DOWN":
-        scalp_score -= 1
+        scalp_score -= 2
+
+    # Check context contradiction
+    lower_tf_direction = "BUY" if (sig_5m["score"] * 2 + sig_15m["score"] * 1.5) >= 0 else "SELL"
+    ctx_direction = "BUY" if ctx_trend == "UP" else "SELL" if ctx_trend == "DOWN" else None
+    contradict = ctx_direction and lower_tf_direction != ctx_direction
+    prefix = "⚠️CT " if contradict else ""
 
     if scalp_score >= 1.5:
-        bias = "BUY"
+        bias = f"{prefix}BUY"
     elif scalp_score <= -1.5:
-        bias = "SELL"
+        bias = f"{prefix}SELL"
     else:
         bias = "WAIT"
 
@@ -352,6 +407,7 @@ def run_scalp_analysis(instrument: str = "xau", no_cache: bool = False) -> str:
 
     cfg = INSTRUMENTS[instrument]
     tf_data = fetch_all_timeframes(cfg, use_cache=not no_cache)
+    tf_data = adjust_to_spot(tf_data, cfg)
 
     if not tf_data:
         return "No data. Check connection."
@@ -372,6 +428,7 @@ def run_scalp_signal(instrument: str = "xau", no_cache: bool = False) -> str:
 
     cfg = INSTRUMENTS[instrument]
     tf_data = fetch_all_timeframes(cfg, use_cache=not no_cache)
+    tf_data = adjust_to_spot(tf_data, cfg)
 
     if not tf_data:
         return "No data."

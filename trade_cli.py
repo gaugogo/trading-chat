@@ -50,15 +50,15 @@ from volume_profile import analyze_all_timeframes as analyze_vp_all, FullVPRepor
 
 
 def run_analysis(instrument: str = "xau", no_cache: bool = False) -> str:
-    """Run full multi-timeframe analysis (same as analysis.py main)."""
-    from analysis import format_report
+    """Run full multi-timeframe analysis (raw data for AI)."""
+    from analysis import build_raw_data_summary
     cfg = INSTRUMENTS.get(instrument)
     if not cfg:
         return f"Unknown: {instrument}"
     tf_data = fetch_all_timeframes(cfg, use_cache=not no_cache)
     if not tf_data:
         return "No data."
-    return format_report(tf_data, cfg)
+    return build_raw_data_summary(tf_data, cfg)
 
 
 def run_signal(instrument: str = "xau", no_cache: bool = False) -> str:
@@ -195,7 +195,7 @@ def run_vp(instrument: str = "xau", no_cache: bool = False) -> str:
 
 def run_chat(instrument: str = "xau", question: str = "", no_cache: bool = False) -> str:
     """Chat with DeepSeek AI about current market data."""
-    from analysis import format_report, call_deepseek
+    from analysis import build_raw_data_summary, call_deepseek
     from instruments import INSTRUMENTS
 
     DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY", "")
@@ -218,11 +218,11 @@ def run_chat(instrument: str = "xau", question: str = "", no_cache: bool = False
     if not tf_data:
         return "No data."
 
-    report = format_report(tf_data, cfg)
+    raw_data = build_raw_data_summary(tf_data, cfg)
     default_q = "Give me a detailed trading plan with entry, SL, TP, and R:R."
     q = question.strip() or default_q
 
-    result = call_deepseek(report, q, DEEPSEEK_API_KEY, cfg)
+    result = call_deepseek(raw_data, q, DEEPSEEK_API_KEY, cfg)
     return result or "❌ DeepSeek API returned no response."
 
 
@@ -267,7 +267,7 @@ def run_learn(
     question: str = "",
 ) -> str:
     """Educational analysis with DeepSeek + Pi Agent follow-up."""
-    from analysis import format_report, call_deepseek
+    from analysis import build_raw_data_summary, call_deepseek
 
     DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY", "")
     _env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
@@ -286,7 +286,7 @@ def run_learn(
     if not tf_data:
         return "No data."
 
-    report = format_report(tf_data, cfg)
+    raw_data = build_raw_data_summary(tf_data, cfg)
 
     from education.prompt_templates import build_educational_prompt, build_user_prompt, MARKDOWN_EDUCATION_SECTION
     from education.conversation_flow import get_learning_summary
@@ -301,8 +301,8 @@ def run_learn(
     if DEEPSEEK_API_KEY:
         lines.append("## 🤖 DeepSeek Analysis")
         lines.append("")
-        user_prompt = build_user_prompt(report, cfg, style="educational")
-        result = call_deepseek(report, question or "Give me a detailed educational analysis.", DEEPSEEK_API_KEY, cfg)
+        user_prompt = build_user_prompt(raw_data, cfg, style="educational")
+        result = call_deepseek(raw_data, question or "Give me a detailed educational analysis.", DEEPSEEK_API_KEY, cfg)
         if result:
             lines.append(result)
             lines.append("")

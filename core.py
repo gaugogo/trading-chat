@@ -350,19 +350,28 @@ def adjust_to_spot(tf_data: Dict[str, pd.DataFrame], cfg: Dict[str, Any]) -> Dic
         symbol=cfg.get("symbol", ""),
     )
     if spot_price is None:
+        logger.warning(f"adjust_to_spot: No spot price for {cfg.get('id')}")
         return tf_data
 
+    # Use the SMALLEST timeframe (most recent data) for offset, not Daily
     futures_close = None
-    for tf_name in TF_ORDER:
+    used_tf = None
+    for tf_name in reversed(TF_ORDER):  # 5m → 15m → 1H → 4H → Daily
         df = tf_data.get(tf_name)
         if df is not None and not df.empty:
             futures_close = df["Close"].iloc[-1]
+            used_tf = tf_name
             break
 
     if futures_close is None or pd.isna(futures_close):
+        logger.warning(f"adjust_to_spot: No futures close for {cfg.get('id')}")
         return tf_data
 
     offset = float(futures_close) - spot_price
+    logger.info(
+        f"adjust_to_spot [{cfg.get('id')}]: futures={futures_close:.2f} "
+        f"spot={spot_price:.2f} offset={offset:+.2f} (using {used_tf})"
+    )
     if abs(offset) < 0.01:
         return tf_data
 

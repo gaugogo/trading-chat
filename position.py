@@ -12,6 +12,7 @@ from typing import Dict, List, Tuple, Optional, Any
 from datetime import datetime, timedelta
 
 from core import (
+    adjust_to_spot,
     fetch_all_timeframes,
     fetch_spot_price,
     calculate_indicators,
@@ -507,6 +508,72 @@ def build_position_report(tf_data: Dict[str, pd.DataFrame], cfg: Dict[str, Any])
 
 # ─── Quick signal ─────────────────────────────────────────────────────
 
+def build_position_data_for_ai(tf_data: Dict[str, pd.DataFrame], cfg: Dict[str, Any]) -> str:
+    """Build raw data dump for DeepSeek — position trading context."""
+    d = cfg["decimals"]
+    name = cfg["display_name"]
+    lines: List[str] = []
+    lines.append(f"=== POSITION TRADING RAW DATA: {name} ===")
+    lines.append("")
+
+    # Macro trend data
+    macro = macro_trend_score(tf_data.get("Daily", pd.DataFrame()))
+    lines.append("【MACRO TREND DATA — Daily】")
+    if macro["sma200"]:
+        lines.append(f"  SMA200: {fmt_price(macro['sma200'], d)}")
+    if macro["pct_from_200"] is not None:
+        lines.append(f"  Price vs SMA200: {macro['pct_from_200']:+.1f}%")
+    lines.append(f"  Trend: {macro['trend']} (score: {macro['score']:+.1f})")
+    for detail in macro["details"]:
+        lines.append(f"  - {detail}")
+    lines.append("")
+
+    # Multi-TF indicators
+    for tf_name in ["Daily", "4H", "1H"]:
+        df = tf_data.get(tf_name)
+        if df is None or df.empty:
+            continue
+        last = df.iloc[-1]
+        lines.append(f"【{tf_name}】")
+        lines.append(f"  O={fmt_price(last['Open'], d)} H={fmt_price(last['High'], d)} L={fmt_price(last['Low'], d)} C={fmt_price(last['Close'], d)}")
+        for col, label in [('SMA_20','SMA20'),('SMA_50','SMA50'),('SMA_200','SMA200')]:
+            val = last.get(col, np.nan)
+            if not pd.isna(val):
+                lines.append(f"  {label}: {fmt_price(val, d)}")
+        for col, label in [('RSI_14','RSI14'),('MACD','MACD'),('MACD_Signal','MACD_Signal')]:
+            val = last.get(col, np.nan)
+            if not pd.isna(val):
+                lines.append(f"  {label}: {float(val):.2f}")
+        atr = last.get('ATR', np.nan)
+        if not pd.isna(atr):
+            lines.append(f"  ATR14: {fmt_price(atr, d)}")
+        lines.append("")
+
+    # Long-term S/R
+    sr = longterm_sr_zones(tf_data.get("Daily", pd.DataFrame()), d)
+    lines.append("【LONG-TERM S/R LEVELS】")
+    lines.append(f"  Monthly Range: {sr['monthly_range']}")
+    lines.append(f"  Quarterly Range: {sr['quarterly_range']}")
+    lines.append(f"  Yearly Range: {sr['yearly_range']}")
+    lines.append(f"  Monthly Pivot: {sr['monthly_pivot']} (R1:{sr['monthly_r1']} S1:{sr['monthly_s1']})")
+    lines.append(f"  Resistance: {', '.join(fmt_price(r, d) for r in sr['resistance'][:5])}")
+    lines.append(f"  Support: {', '.join(fmt_price(s, d) for s in sr['support'][:5])}")
+    sma_str = "  ".join(f"{k}: {fmt_price(v, d)}" for k, v in sr.get("sma_levels", {}).items())
+    if sma_str:
+        lines.append(f"  SMA Levels: {sma_str}")
+    lines.append("")
+
+    # Confluence
+    conf = position_confluence(tf_data)
+    lines.append("【MULTI-TF CONFLUENCE】")
+    lines.append(f"  {conf['confluence']}")
+    lines.append(f"  Weighted Score: {conf['avg_score']:+.1f}")
+    for detail in conf["details"]:
+        lines.append(detail)
+
+    return "\n".join(lines)
+
+
 def build_position_summary(tf_data: Dict[str, pd.DataFrame], cfg: Dict[str, Any]) -> str:
     macro = macro_trend_score(tf_data.get("Daily", pd.DataFrame()))
     daily_last = tf_data.get("Daily", pd.DataFrame()).iloc[-1] if tf_data.get("Daily") is not None and not tf_data["Daily"].empty else None
@@ -529,6 +596,7 @@ def run_position_analysis(instrument: str = "xau", no_cache: bool = False) -> st
 
     cfg = INSTRUMENTS[instrument]
     tf_data = fetch_all_timeframes(cfg, use_cache=not no_cache)
+    tf_data = adjust_to_spot(tf_data, cfg)
 
     if not tf_data:
         return "No data."
@@ -546,6 +614,7 @@ def run_position_signal(instrument: str = "xau", no_cache: bool = False) -> str:
 
     cfg = INSTRUMENTS[instrument]
     tf_data = fetch_all_timeframes(cfg, use_cache=not no_cache)
+    tf_data = adjust_to_spot(tf_data, cfg)
 
     if not tf_data:
         return "No data."

@@ -29,6 +29,7 @@ from rich.markdown import Markdown
 
 from instruments import INSTRUMENTS
 from smc import analyze_all_smc, format_smc_footer, smc_signal_compact
+from price_action import analyze_price_action, format_pa_summary, format_pa_compact
 
 # ─── RE-EXPORT FROM core.py ───
 
@@ -67,31 +68,59 @@ if os.path.exists(_env_path):
 
 # ─── REPORT (unique to analysis.py) ───
 
-def build_technical_summary(tf_data: Dict[str, pd.DataFrame], decimals: int) -> str:
-    """Build compact technical summary (used for quick AI context)."""
+def build_raw_data_summary(tf_data: Dict[str, pd.DataFrame], cfg: Dict[str, Any]) -> str:
+    """Build raw data dump for DeepSeek AI — no local analysis, just indicators & levels."""
+    d = cfg["decimals"]
     lines: List[str] = []
+    lines.append(f"=== RAW MARKET DATA: {cfg['display_name']} ===")
+    lines.append(f"Time: {pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S UTC')}")
+    lines.append("")
+
     for tf_name in TF_ORDER:
         if tf_name not in tf_data or tf_data[tf_name].empty or len(tf_data[tf_name]) < 5:
             continue
         df = tf_data[tf_name]
         last = df.iloc[-1]
-        trend, score = determine_trend(df)
-        d = decimals
-        rsi = f"{last['RSI_14']:.1f}" if 'RSI_14' in df.columns and not pd.isna(last.get('RSI_14', np.nan)) else "N/A"
-        macd = f"{last['MACD']:.1f}" if 'MACD' in df.columns and not pd.isna(last.get('MACD', np.nan)) else "N/A"
-        macd_sig = f"{last['MACD_Signal']:.1f}" if 'MACD_Signal' in df.columns and not pd.isna(last.get('MACD_Signal', np.nan)) else "N/A"
-        sma20 = f"{last['SMA_20']:.{d}f}" if 'SMA_20' in df.columns and not pd.isna(last.get('SMA_20', np.nan)) else "N/A"
-        sma50 = f"{last['SMA_50']:.{d}f}" if 'SMA_50' in df.columns and not pd.isna(last.get('SMA_50', np.nan)) else "N/A"
-        bb_up = f"{last['BB_Upper']:.{d}f}" if 'BB_Upper' in df.columns and not pd.isna(last.get('BB_Upper', np.nan)) else "N/A"
-        bb_lo = f"{last['BB_Lower']:.{d}f}" if 'BB_Lower' in df.columns and not pd.isna(last.get('BB_Lower', np.nan)) else "N/A"
-        atr = f"${last['ATR']:.{d}f}" if 'ATR' in df.columns and not pd.isna(last.get('ATR', np.nan)) else "N/A"
-        lines.append(
-            f"[{tf_name}] Trend:{trend}({score:+d}) Close:{fmt_price(last['Close'], d)} "
-            f"RSI:{rsi} MACD:{macd}/{macd_sig} "
-            f"SMA20:{sma20} SMA50:{sma50} "
-            f"BB_Upper:{bb_up} BB_Lower:{bb_lo} "
-            f"ATR:{atr}"
-        )
+        lines.append(f"--- {tf_name} ({len(df)} candles) ---")
+        lines.append(f"  O={fmt_price(last['Open'], d)} H={fmt_price(last['High'], d)} L={fmt_price(last['Low'], d)} C={fmt_price(last['Close'], d)}")
+
+        for col, label in [('SMA_20','SMA20'),('SMA_50','SMA50'),('SMA_200','SMA200'),('EMA_9','EMA9'),('EMA_21','EMA21')]:
+            val = last.get(col, np.nan)
+            if not pd.isna(val):
+                lines.append(f"  {label}: {fmt_price(val, d)}")
+
+        for col, label in [('RSI_14','RSI14'),('MACD','MACD'),('MACD_Signal','MACD_Signal'),('MACD_Hist','MACD_Hist')]:
+            val = last.get(col, np.nan)
+            if not pd.isna(val):
+                lines.append(f"  {label}: {float(val):.2f}")
+
+        for col, label in [('BB_Upper','BB_Upper'),('BB_Middle','BB_Mid'),('BB_Lower','BB_Lower'),('BB_Width','BB_Width')]:
+            val = last.get(col, np.nan)
+            if not pd.isna(val):
+                if 'Width' in label:
+                    lines.append(f"  {label}: {float(val)*100:.2f}%")
+                else:
+                    lines.append(f"  {label}: {fmt_price(val, d)}")
+
+        atr = last.get('ATR', np.nan)
+        if not pd.isna(atr):
+            lines.append(f"  ATR14: {fmt_price(atr, d)}")
+
+        vol = last.get('Volume', np.nan)
+        vol_sma = last.get('Volume_SMA_20', np.nan)
+        if not pd.isna(vol) and not pd.isna(vol_sma) and vol_sma > 0:
+            lines.append(f"  Volume: {vol:,.0f} (vs SMA20: {vol_sma:,.0f}, ratio: {vol/vol_sma:.2f}x)")
+
+        if len(df) >= 20:
+            r20 = df['High'].rolling(20).max().iloc[-1]
+            s20 = df['Low'].rolling(20).min().iloc[-1]
+            lines.append(f"  Resistance(20): {fmt_price(r20, d)}  Support(20): {fmt_price(s20, d)}")
+        if len(df) >= 50:
+            r50 = df['High'].rolling(50).max().iloc[-1]
+            s50 = df['Low'].rolling(50).min().iloc[-1]
+            lines.append(f"  Resistance(50): {fmt_price(r50, d)}  Support(50): {fmt_price(s50, d)}")
+        lines.append("")
+
     return "\n".join(lines)
 
 
@@ -257,52 +286,6 @@ def format_report(tf_data: Dict[str, pd.DataFrame], cfg: Dict[str, Any], spot_pr
 
         lines.append("")
 
-    lines.append("\u3010CONFLUENCE ANALYSIS\u3011")
-    trends: Dict[str, str] = {}
-    for tf_name in TF_ORDER:
-        if tf_name in tf_data and not tf_data[tf_name].empty:
-            trend, _ = determine_trend(tf_data[tf_name])
-            trends[tf_name] = trend
-
-    up_count = sum(1 for v in trends.values() if v == "UP")
-    down_count = sum(1 for v in trends.values() if v == "DOWN")
-    side_count = sum(1 for v in trends.values() if v == "SIDEWAYS")
-
-    trend_dir = {"UP": 1, "DOWN": -1, "SIDEWAYS": 0, "WAIT": 0}
-    weighted_score = sum(
-        trend_dir.get(trends.get(tf, "WAIT"), 0) * TF_WEIGHTS.get(tf, 1)
-        for tf in TF_ORDER
-        if tf in trends
-    )
-
-    lines.append(f"  UP: {up_count}  |  DOWN: {down_count}  |  SIDEWAYS: {side_count}")
-    lines.append(f"  Weighted score: {weighted_score:+.1f}")
-    lines.append(f"  Sequence: {' \u2192 '.join(f'{k}({v})' for k, v in trends.items())}")
-    lines.append("")
-
-    if weighted_score >= 8:
-        lines.append("  \U0001f7e2 STRONG BUY SIGNAL \u2014 All timeframes aligned bullish")
-        lines.append("  \u2192 Strategy: Look for pullback entries on 15m/5m to EMA or support")
-    elif weighted_score >= 3:
-        lines.append("  \U0001f7e2 BUY BIAS \u2014 Daily trend UP, trade with the main trend")
-        lines.append("  \u2192 Strategy: Buy on 1H/15m pullback to SMA20 or EMA21")
-    elif weighted_score <= -8:
-        lines.append("  \U0001f534 STRONG SELL SIGNAL \u2014 All timeframes aligned bearish")
-        lines.append("  \u2192 Strategy: Look for bounce entries on 15m/5m to EMA or resistance")
-    elif weighted_score <= -3:
-        lines.append("  \U0001f534 SELL BIAS \u2014 Daily trend DOWN, trade with the main trend")
-        lines.append("  \u2192 Strategy: Sell on 1H/15m bounce to SMA20 or EMA21")
-    elif weighted_score >= 1:
-        lines.append("  \U0001f7e1 CAUTIOUS BUY \u2014 Mixed but bullish bias")
-        lines.append("  \u2192 Strategy: Reduce position size, wait for clearer signal")
-    elif weighted_score <= -1:
-        lines.append("  \U0001f7e1 CAUTIOUS SELL \u2014 Mixed but bearish bias")
-        lines.append("  \u2192 Strategy: Reduce position size, wait for clearer signal")
-    else:
-        lines.append("  \u23f8\ufe0f WAIT \u2014 Conflicting timeframes, no clear direction")
-        lines.append("  \u2192 Strategy: Stay out or trade lower TF with tight stops")
-
-    lines.append("")
     lines.append("=" * 72)
     return "\n".join(lines)
 
@@ -316,17 +299,10 @@ def call_deepseek(report_text: str, user_question: str, api_key: str, cfg: Dict[
     to the legacy simple prompt.
     """
     system_prompt = (
-        f"You are an expert {cfg['prompt_analyst_type']} technical analyst. "
-        f"You specialize in multi-timeframe analysis for {cfg['prompt_instrument']}. "
-        "Analyze the data provided and give clear, actionable trading recommendations.\n\n"
-        "Guidelines:\n"
-        "- Always identify the main trend (daily) first\n"
-        "- Provide specific entry zones, stop loss, and take profit levels\n"
-        "- Include risk management advice\n"
-        "- If timeframes conflict, explain which to follow\n"
-        "- Use proper risk/reward ratio calculations\n"
-        "- Be concise but thorough\n"
-        "- Tr\u1ea3 l\u1eddi B\u1eb0NG TI\u1ebeNG VI\u1ec6T (Vietnamese)"
+        f"Bạn là chuyên gia phân tích kỹ thuật {cfg['prompt_instrument']}. "
+        "Nhận dữ liệu thô, tự phân tích toàn bộ. "
+        "Trả lời TIẾNG VIỆT, dùng số liệu cụ thể. "
+        "Bias → Entry/SL/TP → Rủi ro → Bài học."
     )
 
     # Use educational prompt template if available
@@ -335,7 +311,7 @@ def call_deepseek(report_text: str, user_question: str, api_key: str, cfg: Dict[
         system_prompt = build_system_prompt(cfg)
         user_content = build_user_prompt(report_text, cfg, user_question)
     except ImportError:
-        user_content = f"Here is the latest {cfg['prompt_instrument']} multi-timeframe technical analysis:\n\n{report_text}\n\n{user_question}"
+        user_content = f"Dữ liệu {cfg['prompt_instrument']}:\n\n{report_text}\n\n{user_question}"
 
     payload = {
         "model": cfg["deepseek_model"],
@@ -388,6 +364,7 @@ def main() -> None:
     parser.add_argument("--no-ai", action="store_true", help="Skip DeepSeek AI analysis")
     parser.add_argument("--no-cache", action="store_true", help="Bypass local cache")
     parser.add_argument("--smc", action="store_true", help="Include SMC (Smart Money Concepts) analysis")
+    parser.add_argument("--pa", action="store_true", help="Include Price Action analysis (candlestick patterns, S/R, structure)")
     parser.add_argument("--output", "-o", default=".", help="Output directory for reports")
     args = parser.parse_args()
 
@@ -414,24 +391,26 @@ def main() -> None:
         print("No data retrieved. Check symbol or internet connection.")
         return
 
-    report = format_report(tf_data, cfg)
+    # Build raw data for AI (no local analysis displayed)
+    raw_report = format_report(tf_data, cfg)
+    raw_data = build_raw_data_summary(tf_data, cfg)
 
     if args.smc and cfg["has_smc"]:
         print("\n  Running SMC analysis...")
         smc_data = analyze_all_smc(tf_data)
-        report += format_smc_footer(smc_data)
+        raw_report += format_smc_footer(smc_data)
     elif args.smc and not cfg["has_smc"]:
         print("  \u26a0\ufe0f SMC analysis not available for this instrument (xau only).")
 
-    print(report)
+    if args.pa:
+        print("\n  Running Price Action analysis...")
+        pa_data = analyze_price_action(tf_data, cfg)
+        raw_report += "\n" + format_pa_summary(pa_data, cfg["decimals"])
+        print("  ✅ Done!")
 
     out_dir = Path(args.output)
     out_dir.mkdir(parents=True, exist_ok=True)
     prefix = cfg["file_prefix"]
-    filename = out_dir / f"{prefix}_analysis_{pd.Timestamp.now().strftime('%Y%m%d_%H%M')}.txt"
-    with open(filename, "w") as f:
-        f.write(report)
-    print(f"\U0001f4c4 Report saved to: {filename}")
 
     if args.no_ai or not DEEPSEEK_API_KEY:
         if not DEEPSEEK_API_KEY:
@@ -440,14 +419,13 @@ def main() -> None:
             print("   Or create a .env file next to this script with:")
             print('   DEEPSEEK_API_KEY="sk-your-key-here"')
             print()
-        print("\u2500\u2500\u2500 Quick Summary for DeepSeek \u2500\u2500\u2500")
-        print(build_technical_summary(tf_data, cfg["decimals"]))
-        print(build_confluence_summary(tf_data))
+        print("\u2500\u2500\u2500 Raw Data for DeepSeek \u2500\u2500\u2500")
+        print(raw_data)
         print("\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500")
         if args.no_ai:
             print("Skipped AI analysis (--no-ai).")
         else:
-            print("Copy the full report above and paste into DeepSeek chat.")
+            print("Copy the data above and paste into DeepSeek chat.")
         return
 
     print("\n" + "=" * 72)
@@ -472,7 +450,7 @@ def main() -> None:
     question = user_input if user_input else default_q
 
     print()
-    ai_response = call_deepseek(report, question, DEEPSEEK_API_KEY, cfg)
+    ai_response = call_deepseek(raw_report, question, DEEPSEEK_API_KEY, cfg)
 
     if ai_response:
         print("\n" + "=" * 72)
@@ -483,13 +461,12 @@ def main() -> None:
         print()
         print("=" * 72)
 
-        prefix = cfg["file_prefix"]
         ai_filename = out_dir / f"{prefix}_deepseek_{pd.Timestamp.now().strftime('%Y%m%d_%H%M')}.txt"
         with open(ai_filename, "w") as f:
             f.write(ai_response)
         print(f"\U0001f4c4 AI response saved to: {ai_filename}")
     else:
-        print("\n\u26a0\ufe0f  Could not get AI analysis. The report was saved \u2014 you can paste it into DeepSeek chat manually.")
+        print("\n\u26a0\ufe0f  Could not get AI analysis. Data has been collected — you can paste it into DeepSeek chat manually.")
 
 
 if __name__ == "__main__":

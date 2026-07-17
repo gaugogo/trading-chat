@@ -18,74 +18,18 @@ from typing import Dict, Any, Optional
 
 
 def build_system_prompt(cfg: Dict[str, Any]) -> str:
-    """Build the system prompt that teaches rather than just answers.
-
-    Args:
-        cfg: Instrument config (prompt_instrument, prompt_analyst_type, etc.)
-
-    Returns:
-        Structured system prompt string
-    """
-    return f"""Bạn là giáo viên phân tích kỹ thuật cho trader Việt Nam.
-Bạn chuyên về {cfg.get('prompt_instrument', 'phân tích đa khung thời gian')} ({cfg.get('prompt_analyst_type', 'tài chính')}).
-Bạn phân tích dữ liệu đa khung thời gian và LUÔN GIẢI THÍCH TẠI SAO.
-
-══════════════════════════════════════════════════
-  QUY TẮC TRẢ LỜI
-══════════════════════════════════════════════════
-
-1. 🎯 MỞ ĐẦU: Tóm tắt bias thị trường trong 1 câu ngắn gọn
-   Ví dụ: "XAUUSD đang trong xu hướng TĂNG trên Daily nhưng đang điều chỉnh về vùng hỗ trợ 4H."
-
-2. 📊 PHÂN TÍCH CHI TIẾT (3-5 lý do chính):
-   - Mỗi lý do kèm DỮ LIỆU CỤ THỂ (giá, RSI, MACD, v.v.)
-   - Giải thích: "Tại sao chỉ số này quan trọng?"
-   - Nếu tín hiệu mâu thuẫn: giải thích TF nào đáng tin hơn và tại sao
-
-3. 📋 KẾ HOẠCH GIAO DỊCH:
-   - Entry zone cụ thể (không nói chung chung)
-   - Stop Loss + giải thích đặt ở đâu và tại sao
-   - Take Profit các mức + R:R cụ thể
-   - Position size khuyến nghị
-
-4. 🧠 BÀI HỌC HÔM NAY (2-3 bài học):
-   - Kiến thức kỹ thuật trader nên rút ra từ setup này
-   - Ví dụ: "Hôm nay bạn thấy RSI divergence báo hiệu gì?"
-   - Câu hỏi tự kiểm tra: "Bạn có nhận ra điều gì trên chart?"
-
-5. ⚠️ CẢNH BÁO & RỦI RO:
-   - Điều gì sẽ làm setup này fail?
-   - Kịch bản nào sẽ làm bạn mất tiền nếu vào lệnh ngay?
-   - Khi nào nên hủy lệnh?
-
-══════════════════════════════════════════════════
-  QUY TẮC CỨNG
-══════════════════════════════════════════════════
-
-✅ LUÔN LUÔN:
-• Trả lời BẰNG TIẾNG VIỆT (dùng thuật ngữ chuyên ngành giữ nguyên tiếng Anh)
-• Dùng SỐ LIỆU CỤ THỂ từ data, không nói chung chung như "giá đang ở vùng cao"
-• Kèm checklist các bước user nên tự kiểm tra trên chart
-• Giải thích đơn giản như dạy người mới, nhưng vẫn đầy đủ chuyên môn
-
-❌ KHÔNG BAO GIỜ:
-• Nói "mua ở vùng giá thấp" — phải nói giá cụ thể
-• Bỏ qua rủi ro — luôn có SL và cảnh báo
-• Dùng mệnh lệnh — hãy giải thích để user hiểu
-• Trả lời quá dài — tối đa 2000 từ, ưu tiên chất lượng
-
-══════════════════════════════════════════════════
-  CHECKLIST TỰ KIỂM TRA (user nên tự làm)
-══════════════════════════════════════════════════
-
-□ Mở chart Daily và xác nhận trend bằng mắt
-□ 4H có đang tạo HH/HL không?
-□ RSI có divergence không?
-□ MACD có đang ủng hộ bias không?
-□ Volume có xác nhận không?
-□ Có tin tức quan trọng trong 24h tới không?
-□ Nếu trade ngược bias Daily → có lý do chính đáng?
-"""
+    """Build compact system prompt — raw data, let AI do the thinking."""
+    return (
+        f"Bạn là chuyên gia phân tích kỹ thuật {cfg.get('prompt_instrument', '')} cho trader Việt Nam. "
+        "Bạn nhận DỮ LIỆU THÔ (giá, indicators, levels) và tự phân tích toàn bộ.\n"
+        "Trả lời BẰNG TIẾNG VIỆT, dùng số liệu cụ thể, không nói chung chung.\n"
+        "Cấu trúc:\n"
+        "1. Tóm tắt bias + 3 lý do chính (kèm số liệu)\n"
+        "2. Entry zone, SL, TP, R:R cụ thể\n"
+        "3. Rủi ro & cảnh báo\n"
+        "4. Bài học (1-2 câu)\n"
+        "Ngắn gọn, dưới 1000 từ."
+    )
 
 
 def build_user_prompt(
@@ -94,55 +38,15 @@ def build_user_prompt(
     user_question: Optional[str] = None,
     style: str = "educational",
 ) -> str:
-    """Build the user message for DeepSeek API call.
-
-    Args:
-        report_text: Technical analysis report text (data)
-        cfg: Instrument config
-        user_question: Optional custom question (default: standard educational)
-        style: 'educational' (default), 'quick', 'beginner'
-
-    Returns:
-        Formatted user prompt
-    """
     if user_question:
-        return (
-            f"Dưới đây là dữ liệu phân tích {cfg['prompt_instrument']} mới nhất:\n\n"
-            f"{report_text}\n\n"
-            f"Câu hỏi của tôi: {user_question}\n\n"
-            f"Lưu ý: Hãy trả lời theo đúng quy tắc giáo viên đã hướng dẫn."
-        )
+        return f"Dữ liệu {cfg['prompt_instrument']}:\n\n{report_text}\n\nCâu hỏi: {user_question}"
 
-    # Default educational prompt
-    if style == "beginner":
-        style_extra = (
-            "Giải thích như tôi là người mới bắt đầu học trading.\n"
-            "Đừng dùng thuật ngữ quá phức tạp nếu chưa giải thích.\n"
-            "Cho tôi biết tôi nên học thêm khái niệm gì sau phân tích này."
-        )
-    elif style == "quick":
-        style_extra = (
-            "Tôi cần 1 câu trả lời NGẮN GỌN, chỉ gồm:\n"
-            "1. Bias: BUY/SELL/WAIT + 1 câu lý do\n"
-            "2. Entry/SL/TP + R:R\n"
-            "3. 1 bài học chính"
-        )
-    else:  # educational
-        style_extra = (
-            "Hãy phân tích theo đúng cấu trúc giáo viên:\n"
-            "1. Tóm tắt bias\n"
-            "2. 3 lý do chính (có số liệu cụ thể)\n"
-            "3. Kế hoạch giao dịch (entry, SL, TP, R:R)\n"
-            "4. Bài học hôm nay\n"
-            "5. Cảnh báo rủi ro"
-        )
-
-    return (
-        f"Dưới đây là dữ liệu phân tích {cfg['prompt_instrument']} mới nhất:\n\n"
-        f"{report_text}\n\n"
-        f"Dựa trên dữ liệu trên, hãy phân tích và đưa ra khuyến nghị giao dịch.\n\n"
-        f"{style_extra}"
-    )
+    style_map = {
+        "beginner": "Giải thích đơn giản như cho người mới.",
+        "quick": "Chỉ cần: Bias, Entry/SL/TP, R:R, 1 bài học.",
+    }
+    extra = style_map.get(style, "Phân tích: bias, entry/SL/TP, rủi ro, bài học.")
+    return f"Dữ liệu {cfg['prompt_instrument']}:\n\n{report_text}\n\n{extra}"
 
 
 def build_deepseek_payload(

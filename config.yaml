@@ -81,6 +81,14 @@ strategy:
     entry_tf: "1H"
     confirm_tf: "15m"
 
+# ─── PRICE ACTION ───
+pa:
+  swing_lookback: 5              # Bars each side for swing point detection
+  cluster_tolerance_atr: 0.5     # Cluster levels within this fraction of ATR
+  pattern_min_body_ratio: 0.6    # Min body ratio for pin bar / doji detection
+  max_levels_per_tf: 4           # Max support/resistance levels per timeframe
+  include_round_numbers: true    # Add psychological round-number levels
+
 # ─── BACKTEST DEFAULTS ───
 backtest:
   initial_capital: 100.0   # Starting capital

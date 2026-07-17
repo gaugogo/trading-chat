@@ -12,6 +12,7 @@ from typing import Dict, List, Tuple, Optional, Any
 from datetime import datetime
 
 from core import (
+    adjust_to_spot,
     fetch_all_timeframes,
     fetch_spot_price,
     calculate_indicators,
@@ -426,6 +427,74 @@ def build_daytrade_report(tf_data: Dict[str, pd.DataFrame], cfg: Dict[str, Any])
 
 # ─── Quick signal ─────────────────────────────────────────────────────
 
+def build_daytrade_data_for_ai(tf_data: Dict[str, pd.DataFrame], cfg: Dict[str, Any]) -> str:
+    """Build raw data dump for DeepSeek — day trade context."""
+    d = cfg["decimals"]
+    name = cfg["display_name"]
+    lines: List[str] = []
+    lines.append(f"=== DAY TRADING RAW DATA: {name} ===")
+    lines.append("")
+
+    for tf_name in ["4H", "1H", "15m", "5m"]:
+        df = tf_data.get(tf_name)
+        if df is None or df.empty:
+            continue
+        last = df.iloc[-1]
+        lines.append(f"【{tf_name}】")
+        lines.append(f"  O={fmt_price(last['Open'], d)} H={fmt_price(last['High'], d)} L={fmt_price(last['Low'], d)} C={fmt_price(last['Close'], d)}")
+        for col, label in [('SMA_20','SMA20'),('EMA_9','EMA9'),('EMA_21','EMA21')]:
+            val = last.get(col, np.nan)
+            if not pd.isna(val):
+                lines.append(f"  {label}: {fmt_price(val, d)}")
+        for col, label in [('RSI_14','RSI14'),('MACD','MACD'),('MACD_Signal','MACD_Signal')]:
+            val = last.get(col, np.nan)
+            if not pd.isna(val):
+                lines.append(f"  {label}: {float(val):.2f}")
+        atr = last.get('ATR', np.nan)
+        if not pd.isna(atr):
+            lines.append(f"  ATR14: {fmt_price(atr, d)}")
+        lines.append("")
+
+    # VWAP
+    vwap = calculate_vwap(tf_data.get("15m", pd.DataFrame()))
+    if vwap:
+        lines.append(f"【VWAP (15m)】: {fmt_price(vwap, d)}")
+        lines.append("")
+
+    # Volume Profile
+    vp = volume_profile_poc(tf_data.get("1H", pd.DataFrame()))
+    if vp:
+        lines.append("【VOLUME PROFILE (1H)】")
+        lines.append(f"  POC: {fmt_price(vp['poc'], d)}")
+        lines.append(f"  Value Area: {fmt_price(vp['val'], d)} - {fmt_price(vp['vah'], d)}")
+        lines.append(f"  Price vs POC: {vp['price_vs_poc']}")
+        lines.append("")
+
+    # Opening Range
+    or_levels = opening_range_levels(tf_data.get("15m", pd.DataFrame()))
+    if or_levels:
+        lines.append("【OPENING RANGE (15m)】")
+        lines.append(f"  Range: {fmt_price(or_levels['or_low'], d)} - {fmt_price(or_levels['or_high'], d)}")
+        lines.append(f"  Price position: {or_levels['position']}")
+        lines.append("")
+
+    # 15m Signal data
+    sig_15m = daytrade_signal_15m(tf_data.get("15m", pd.DataFrame()))
+    lines.append("【15M ENTRY SIGNAL DATA】")
+    lines.append(f"  EMA9: {fmt_price(sig_15m['ema9'], d)}  EMA21: {fmt_price(sig_15m['ema21'], d)}")
+    lines.append(f"  RSI: {sig_15m['rsi']}")
+    for detail in sig_15m.get("details", []):
+        lines.append(f"  - {detail}")
+    lines.append("")
+
+    sig_5m = daytrade_signal_15m(tf_data.get("5m", pd.DataFrame()))
+    lines.append("【5M PRECISION DATA】")
+    for detail in sig_5m.get("details", []):
+        lines.append(f"  - {detail}")
+
+    return "\n".join(lines)
+
+
 def build_daytrade_summary(tf_data: Dict[str, pd.DataFrame], cfg: Dict[str, Any]) -> str:
     d = cfg["decimals"]
     h4_trend, _ = determine_trend(tf_data.get("4H", pd.DataFrame()))
@@ -459,6 +528,7 @@ def run_daytrade_analysis(instrument: str = "xau", no_cache: bool = False) -> st
 
     cfg = INSTRUMENTS[instrument]
     tf_data = fetch_all_timeframes(cfg, use_cache=not no_cache)
+    tf_data = adjust_to_spot(tf_data, cfg)
 
     if not tf_data:
         return "No data."
@@ -476,6 +546,7 @@ def run_daytrade_signal(instrument: str = "xau", no_cache: bool = False) -> str:
 
     cfg = INSTRUMENTS[instrument]
     tf_data = fetch_all_timeframes(cfg, use_cache=not no_cache)
+    tf_data = adjust_to_spot(tf_data, cfg)
 
     if not tf_data:
         return "No data."

@@ -12,6 +12,7 @@ from typing import Dict, List, Tuple, Optional, Any
 from datetime import datetime
 
 from core import (
+    adjust_to_spot,
     fetch_all_timeframes,
     fetch_spot_price,
     calculate_indicators,
@@ -428,6 +429,59 @@ def build_swing_report(tf_data: Dict[str, pd.DataFrame], cfg: Dict[str, Any]) ->
 
 # ─── Quick signal ─────────────────────────────────────────────────────
 
+def build_swing_data_for_ai(tf_data: Dict[str, pd.DataFrame], cfg: Dict[str, Any]) -> str:
+    """Build raw data dump for DeepSeek — swing trading context."""
+    d = cfg["decimals"]
+    name = cfg["display_name"]
+    lines: List[str] = []
+    lines.append(f"=== SWING TRADING RAW DATA: {name} ===")
+    lines.append("")
+
+    for tf_name in ["Daily", "4H", "1H", "15m"]:
+        df = tf_data.get(tf_name)
+        if df is None or df.empty:
+            continue
+        last = df.iloc[-1]
+        lines.append(f"【{tf_name}】")
+        lines.append(f"  O={fmt_price(last['Open'], d)} H={fmt_price(last['High'], d)} L={fmt_price(last['Low'], d)} C={fmt_price(last['Close'], d)}")
+        for col, label in [('SMA_20','SMA20'),('SMA_50','SMA50')]:
+            val = last.get(col, np.nan)
+            if not pd.isna(val):
+                lines.append(f"  {label}: {fmt_price(val, d)}")
+        for col, label in [('RSI_14','RSI14'),('MACD','MACD'),('MACD_Signal','MACD_Signal')]:
+            val = last.get(col, np.nan)
+            if not pd.isna(val):
+                lines.append(f"  {label}: {float(val):.2f}")
+        atr = last.get('ATR', np.nan)
+        if not pd.isna(atr):
+            lines.append(f"  ATR14: {fmt_price(atr, d)}")
+        bb_upper = last.get('BB_Upper', np.nan)
+        bb_lower = last.get('BB_Lower', np.nan)
+        if not pd.isna(bb_upper) and not pd.isna(bb_lower):
+            lines.append(f"  BB_Upper: {fmt_price(bb_upper, d)}  BB_Lower: {fmt_price(bb_lower, d)}")
+        lines.append("")
+
+    # Fibonacci
+    fib = calculate_fib_levels(tf_data.get("4H", pd.DataFrame()), 50)
+    if fib:
+        lines.append("【FIBONACCI — 4H】")
+        lines.append(f"  Swing High: {fmt_price(fib['swing_high'], d)}")
+        lines.append(f"  Swing Low: {fmt_price(fib['swing_low'], d)}")
+        lines.append(f"  Range: {fmt_price(fib['range'], d)}")
+        lines.append(f"  Current Price: {fmt_price(fib['price'], d)} ({fib['price_in_fib']})")
+        for level in ["0.0", "0.382", "0.5", "0.618", "0.786", "1.0", "1.272", "1.618"]:
+            lines.append(f"  Fib {level}: {fmt_price(fib[level], d)}")
+        lines.append("")
+
+    # Key S/R
+    levels = find_key_levels(tf_data, d)
+    lines.append("【KEY S/R LEVELS】")
+    lines.append(f"  Resistance: {', '.join(fmt_price(r, d) for r in levels['resistance'][:4])}")
+    lines.append(f"  Support: {', '.join(fmt_price(s, d) for s in levels['support'][:4])}")
+
+    return "\n".join(lines)
+
+
 def build_swing_summary(tf_data: Dict[str, pd.DataFrame], cfg: Dict[str, Any]) -> str:
     d = cfg["decimals"]
     sig = swing_score(tf_data)
@@ -453,6 +507,7 @@ def run_swing_analysis(instrument: str = "xau", no_cache: bool = False) -> str:
 
     cfg = INSTRUMENTS[instrument]
     tf_data = fetch_all_timeframes(cfg, use_cache=not no_cache)
+    tf_data = adjust_to_spot(tf_data, cfg)
 
     if not tf_data:
         return "No data. Check connection."
@@ -470,6 +525,7 @@ def run_swing_signal(instrument: str = "xau", no_cache: bool = False) -> str:
 
     cfg = INSTRUMENTS[instrument]
     tf_data = fetch_all_timeframes(cfg, use_cache=not no_cache)
+    tf_data = adjust_to_spot(tf_data, cfg)
 
     if not tf_data:
         return "No data."
